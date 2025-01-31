@@ -2,7 +2,7 @@ import json
 from websocietysimulator import Simulator
 from websocietysimulator.agent import RecommendationAgent
 import tiktoken
-from websocietysimulator.llm import LLMBase, InfinigenceLLM, InfinigenceEmbeddings
+from websocietysimulator.llm import LLMBase, InfinigenceLLM
 from websocietysimulator.agent.modules.planning_modules import PlanningBase
 from websocietysimulator.agent.modules.reasoning_modules import ReasoningBase
 from websocietysimulator.agent.modules.memory_modules import MemoryBase
@@ -20,8 +20,8 @@ def num_tokens_from_string(string: str) -> int:
     return a
 
 class RecMemory(MemoryBase):
-    def __init__(self,llm):
-        super.__init__(memory_type = "rec", llm=llm)
+    def __init__(self, llm):
+        super().__init__(memory_type = "rec", llm=llm)
 
     def retriveMemory(self, query_scenario: str):
         # Extract task name from query scenario
@@ -111,7 +111,7 @@ class RecReasoning(ReasoningBase):
         reasoning_result = self.llm(
             messages=messages,
             temperature=0.1,
-            max_tokens=1000
+            max_tokens=4096
         )
         
         return reasoning_result
@@ -124,7 +124,7 @@ class MyRecommendationAgent(RecommendationAgent):
         super().__init__(llm=llm)
         self.planning = RecPlanning(llm=self.llm)
         self.reasoning = RecReasoning(profile_type_prompt='', llm=self.llm)
-        self.memory = RecMemory(llm=self.llm)
+        #self.memory = RecMemory(llm=self.llm)
 
     def workflow(self):
         """
@@ -145,6 +145,7 @@ class MyRecommendationAgent(RecommendationAgent):
 
         user = ''
         item_list = []
+        history_item_reviews = []
         history_review = ''
         for sub_task in plan:
             
@@ -160,9 +161,12 @@ class MyRecommendationAgent(RecommendationAgent):
                     item = self.interaction_tool.get_item(item_id=self.task['candidate_list'][n_bus])
                     keys_to_extract = ['item_id', 'name','stars','review_count','attributes','title', 'average_rating', 'rating_number','description','ratings_count','title_without_series']
                     filtered_item = {key: item[key] for key in keys_to_extract if key in item}
-                item_list.append(filtered_item)
+                    #item_review = self.interaction_tool.get_reviews(item_id=self.task['candidate_list'][n_bus])
+                    #history_item_reviews.append((str(filtered_item) + str(item_review)))
+                    item_list.append(filtered_item)
                 # print(item)
             elif 'review' in sub_task['description']:
+                # find all reviews from the user
                 history_review = str(self.interaction_tool.get_reviews(user_id=self.task['user_id']))
                 input_tokens = num_tokens_from_string(history_review)
                 if input_tokens > 12000:
@@ -171,18 +175,23 @@ class MyRecommendationAgent(RecommendationAgent):
             else:
                 pass
         # DO NOT output your analysis process!??????????
-        task_description = f'''You are a real user on an online platform.
-                                Your historical item review text and stars are as follows: {history_review}. 
+        task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_review}. 
                                 Now you need to rank the following 20 items: {self.task['candidate_list']} according to their match degree to your preference.
-                                Please rank the more interested items more front in your rank list.
-                                The information of the above 20 candidate items is as follows: {item_list}.
-
+                                Please rank the more interested items more front in your rank list. The information of the above 20 candidate items is as follows: {item_list}.
                                 Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format, DO NOT introduce any other item ids!
-                                The correct output format:
-
-                                ['item id1', 'item id2', 'item id3', ...]
-
+                                The correct output format:['item id1', 'item id2', 'item id3', ...]
         '''
+        # task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_review}. 
+        #                         Now you need to rank the following 20 items: {self.task['candidate_list']} according to their match degree to your preference.
+        #                         Please rank the more interested items more front in your rank list. The information and reviews of the above 20 candidate items is as follows: {history_item_reviews}.
+        #                         Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format, DO NOT introduce any other item ids!
+        #                         The correct output format:['item id1', 'item id2', 'item id3', ...]
+        # '''
+        # memory = self.memory(task_description)
+        # print("memory:", memory)
+        # prompt_len = num_tokens_from_string(task_description)
+        # if prompt_len > 4096:
+        #     print(f'prompt_len: {prompt_len}')
         result = self.reasoning(task_description)
 
         try:
@@ -193,7 +202,7 @@ class MyRecommendationAgent(RecommendationAgent):
                 print('Meta Output:',result)
                 print("No list found.")
             print('Processed Output:',eval(result))
-            # time.sleep(4)
+            time.sleep(2)
             return eval(result)
         except:
             print('format error')
@@ -220,7 +229,7 @@ if __name__ == "__main__":
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'./evaluation_results_track2_{task_set}_add_user_info.json', 'w') as f:
+    with open(f'./evaluation_results_track2_{task_set}_unhack.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")

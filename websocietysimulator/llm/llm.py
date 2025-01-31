@@ -42,13 +42,13 @@ class LLMBase:
         raise NotImplementedError("Subclasses need to implement this method")
 
 class InfinigenceLLM(LLMBase):
-    def __init__(self, api_key: str, model: str = "deepseek-r1-distill-qwen-32b"):
+    def __init__(self, api_key: str, model: str = "qwen2.5-72b-instruct"):
         """
         Initialize Deepseek LLM
         
         Args:
             api_key: Deepseek API key
-            model: Model name, defaults to qwen2.5-72b-instruct
+            model: Model name, defaults to qwen2.5-72b-instruct, deepseek-r1-distill-qwen-32b
         """
         super().__init__(model)
         self.client = OpenAI(
@@ -60,7 +60,7 @@ class InfinigenceLLM(LLMBase):
     @retry(
         retry=retry_if_exception_type(Exception),
         wait=wait_exponential(multiplier=1, min=10, max=300),  # 等待时间从10秒开始，指数增长，最长300秒
-        stop=stop_after_attempt(10)  # 最多重试10次
+        stop=stop_after_attempt(16)  # 最多重试16次
     )
     def __call__(self, messages: List[Dict[str, str]], model: Optional[str] = None, temperature: float = 0.0, max_tokens: int = 500, stop_strs: Optional[List[str]] = None, n: int = 1) -> Union[str, List[str]]:
         """
