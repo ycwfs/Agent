@@ -42,7 +42,7 @@ class LLMBase:
         raise NotImplementedError("Subclasses need to implement this method")
 
 class InfinigenceLLM(LLMBase):
-    def __init__(self, api_key: str, model: str = "qwen2.5-72b-instruct"):
+    def __init__(self, api_key: str, model: str = "deepseek-r1-distill-qwen-32b"):
         """
         Initialize Deepseek LLM
         

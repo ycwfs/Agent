@@ -232,4 +232,3 @@ Please fill in this part yourself
         
         # Add to memory store
         self.scenario_memory.add_documents([doc])
-

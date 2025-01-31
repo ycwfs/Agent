@@ -23,10 +23,10 @@ class ReasoningIO(ReasoningBase):
     def __call__(self, task_description: str, feedback :str= ''):
         examples, task_description = self.process_task_description(task_description)
         prompt = '''Your instructions must follow the examples.
-Here are some examples.
-{examples}
-Here is the task:
-{task_description}'''
+                    Here are some examples.
+                    {examples}
+                    Here is the task:
+                    {task_description}'''
         prompt = prompt.format(task_description=task_description, examples=examples)
         messages = [{"role": "user", "content": prompt}]
         reasoning_result = self.llm(

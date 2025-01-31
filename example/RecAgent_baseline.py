@@ -2,9 +2,10 @@ import json
 from websocietysimulator import Simulator
 from websocietysimulator.agent import RecommendationAgent
 import tiktoken
-from websocietysimulator.llm import LLMBase, InfinigenceLLM
+from websocietysimulator.llm import LLMBase, InfinigenceLLM, InfinigenceEmbeddings
 from websocietysimulator.agent.modules.planning_modules import PlanningBase
 from websocietysimulator.agent.modules.reasoning_modules import ReasoningBase
+from websocietysimulator.agent.modules.memory_modules import MemoryBase
 import re
 import logging
 import time
@@ -18,6 +19,46 @@ def num_tokens_from_string(string: str) -> int:
         print(encoding.encode(string))
     return a
 
+class RecMemory(MemoryBase):
+    def __init__(self,llm):
+        super.__init__(memory_type = "rec", llm=llm)
+
+    def retriveMemory(self, query_scenario: str):
+        # Extract task name from query scenario
+        task_name = query_scenario
+        
+        # Return empty string if memory is empty
+        if self.scenario_memory._collection.count() == 0:
+            return ''
+            
+        # Find most similar memory
+        similarity_results = self.scenario_memory.similarity_search_with_score(
+            task_name, k=1)
+            
+        # Extract task trajectories from results
+        task_trajectories = [
+            result[0].metadata['task_trajectory'] for result in similarity_results
+        ]
+        
+        # Join trajectories with newlines and return
+        return '\n'.join(task_trajectories)
+
+    def addMemory(self, current_situation: str):
+        # Extract task description
+        task_name = current_situation
+        
+        # Create document with metadata
+        memory_doc = Document(
+            page_content=task_name,
+            metadata={
+                "task_name": task_name,
+                "task_trajectory": current_situation
+            }
+        )
+        
+        # Add to memory store
+        self.scenario_memory.add_documents([memory_doc])
+
 class RecPlanning(PlanningBase):
     """Inherits from PlanningBase"""
     
@@ -29,28 +70,28 @@ class RecPlanning(PlanningBase):
         """Override the parent class's create_prompt method"""
         if feedback == '':
             prompt = '''You are a planner who divides a {task_type} task into several subtasks. You also need to give the reasoning instructions for each subtask. Your output format should follow the example below.
-The following are some examples:
-Task: I need to find some information to complete a recommendation task.
-sub-task 1: {{"description": "First I need to find user information", "reasoning instruction": "None"}}
-sub-task 2: {{"description": "Next, I need to find item information", "reasoning instruction": "None"}}
-sub-task 3: {{"description": "Next, I need to find review information", "reasoning instruction": "None"}}
+                        The following are some examples:
+                        Task: I need to find some information to complete a recommendation task.
+                        sub-task 1: {{"description": "First I need to find user information", "reasoning instruction": "None"}}
+                        sub-task 2: {{"description": "Next, I need to find item information", "reasoning instruction": "None"}}
+                        sub-task 3: {{"description": "Next, I need to find review information", "reasoning instruction": "None"}}
 
-Task: {task_description}
-'''
+                        Task: {task_description}
+                        '''
             prompt = prompt.format(task_description=task_description, task_type=task_type)
         else:
             prompt = '''You are a planner who divides a {task_type} task into several subtasks. You also need to give the reasoning instructions for each subtask. Your output format should follow the example below.
-The following are some examples:
-Task: I need to find some information to complete a recommendation task.
-sub-task 1: {{"description": "First I need to find user information", "reasoning instruction": "None"}}
-sub-task 2: {{"description": "Next, I need to find item information", "reasoning instruction": "None"}}
-sub-task 3: {{"description": "Next, I need to find review information", "reasoning instruction": "None"}}
+                        The following are some examples:
+                        Task: I need to find some information to complete a recommendation task.
+                        sub-task 1: {{"description": "First I need to find user information", "reasoning instruction": "None"}}
+                        sub-task 2: {{"description": "Next, I need to find item information", "reasoning instruction": "None"}}
+                        sub-task 3: {{"description": "Next, I need to find review information", "reasoning instruction": "None"}}
 
-end
---------------------
-Reflexion:{feedback}
-Task:{task_description}
-'''
+                        end
+                        --------------------
+                        Reflexion:{feedback}
+                        Task:{task_description}
+                        '''
             prompt = prompt.format(example=few_shot, task_description=task_description, task_type=task_type, feedback=feedback)
         return prompt
 
@@ -83,6 +124,7 @@ class MyRecommendationAgent(RecommendationAgent):
         super().__init__(llm=llm)
         self.planning = RecPlanning(llm=self.llm)
         self.reasoning = RecReasoning(profile_type_prompt='', llm=self.llm)
+        self.memory = RecMemory(llm=self.llm)
 
     def workflow(self):
         """
@@ -91,7 +133,7 @@ class MyRecommendationAgent(RecommendationAgent):
             list: Sorted list of item IDs
         """
         # plan = self.planning(task_type='Recommendation Task',
-        #                      task_description="Please make a plan to query user information, you can choose to query user, item, and review information",
+        #                      task_description="Please make a plan to query user information, you can choose to query user, item, and review information, ",
         #                      feedback='',
         #                      few_shot='')
         # print(f"The plan is :{plan}")
@@ -128,27 +170,27 @@ class MyRecommendationAgent(RecommendationAgent):
                     history_review = encoding.decode(encoding.encode(history_review)[:12000])
             else:
                 pass
-        task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_review}. 
-        Now you need to rank the following 20 items: {self.task['candidate_list']} according to their match degree to your preference.
-        Please rank the more interested items more front in your rank list.
-        The information of the above 20 candidate items is as follows: {item_list}.
+        # DO NOT output your analysis process!??????????
+        task_description = f'''You are a real user on an online platform.
+                                Your historical item review text and stars are as follows: {history_review}. 
+                                Now you need to rank the following 20 items: {self.task['candidate_list']} according to their match degree to your preference.
+                                Please rank the more interested items more front in your rank list.
+                                The information of the above 20 candidate items is as follows: {item_list}.
 
-        Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format, DO NOT introduce any other item ids!
-        DO NOT output your analysis process!
+                                Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format, DO NOT introduce any other item ids!
+                                The correct output format:
 
-        The correct output format:
-
-        ['item id1', 'item id2', 'item id3', ...]
+                                ['item id1', 'item id2', 'item id3', ...]
 
         '''
         result = self.reasoning(task_description)
 
         try:
-            # print('Meta Output:',result)
             match = re.search(r"\[.*\]", result, re.DOTALL)
             if match:
                 result = match.group()
             else:
+                print('Meta Output:',result)
                 print("No list found.")
             print('Processed Output:',eval(result))
             # time.sleep(4)
@@ -178,7 +220,7 @@ if __name__ == "__main__":
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'./evaluation_results_track2_{task_set}.json', 'w') as f:
+    with open(f'./evaluation_results_track2_{task_set}_add_user_info.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")
