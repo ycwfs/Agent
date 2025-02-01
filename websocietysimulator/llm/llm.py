@@ -101,7 +101,7 @@ class InfinigenceLLM(LLMBase):
         return self.embedding_model
 
 class OpenAILLM(LLMBase):
-    def __init__(self, api_key: str, model: str = "gpt-3.5-turbo"):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
         """
         Initialize OpenAI LLM
         
@@ -110,8 +110,8 @@ class OpenAILLM(LLMBase):
             model: Model name, defaults to gpt-3.5-turbo
         """
         super().__init__(model)
-        self.client = OpenAI(api_key=api_key)
-        self.embedding_model = OpenAIEmbeddings(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, base_url="https://api.gptsapi.net/v1")
+        self.embedding_model = OpenAIEmbeddings(api_key=api_key, base_url="https://api.gptsapi.net/v1")
         
     def __call__(self, messages: List[Dict[str, str]], model: Optional[str] = None, temperature: float = 0.0, max_tokens: int = 500, stop_strs: Optional[List[str]] = None, n: int = 1) -> Union[str, List[str]]:
         """

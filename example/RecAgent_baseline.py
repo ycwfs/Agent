@@ -2,7 +2,7 @@ import json
 from websocietysimulator import Simulator
 from websocietysimulator.agent import RecommendationAgent
 import tiktoken
-from websocietysimulator.llm import LLMBase, InfinigenceLLM
+from websocietysimulator.llm import LLMBase, InfinigenceLLM, OpenAILLM
 from websocietysimulator.agent.modules.planning_modules import PlanningBase
 from websocietysimulator.agent.modules.reasoning_modules import ReasoningBase
 from websocietysimulator.agent.modules.memory_modules import MemoryBase
@@ -126,6 +126,48 @@ class MyRecommendationAgent(RecommendationAgent):
         self.reasoning = RecReasoning(profile_type_prompt='', llm=self.llm)
         #self.memory = RecMemory(llm=self.llm)
 
+    def add_average_score(self, filtered_item, reviews):
+        """
+        Calculate the average score of reviews
+        Args:
+            reviews: list of reviews
+        Returns:
+            float: average score
+        """
+        total_stars = 0
+        total_cool = 0
+        total_useful = 0
+        total_fanny = 0
+        for review in reviews:
+            total_stars += review['stars']
+            total_cool += review['cool']
+            total_useful += review['useful']
+            total_fanny += review['funny']
+        #filtered_item['average_stars'] = round(total_stars/len(reviews),2)
+        filtered_item['cool'] = round(total_cool/len(reviews),2)
+        filtered_item['useful'] = round(total_useful/len(reviews),2)
+        filtered_item['fanny'] = round(total_fanny/len(reviews),2)
+        return filtered_item
+
+    def average_score(self, reviews):
+        """
+        Calculate the average score of reviews
+        Args:
+            reviews: list of reviews
+        Returns:
+            float: average score
+        """
+        total_stars = 0
+        total_cool = 0
+        total_useful = 0
+        total_fanny = 0
+        for review in reviews:
+            total_stars += review['stars']
+            total_cool += review['cool']
+            total_useful += review['useful']
+            total_fanny += review['funny']
+        return f'average_stars: {round(total_stars/len(reviews),2)}, average_cool: {round(total_cool/len(reviews),2)}, average_useful: {round(total_useful/len(reviews),2)}, average_fanny: {round(total_fanny/len(reviews),2)}'
+
     def workflow(self):
         """
         Simulate user behavior
@@ -146,7 +188,10 @@ class MyRecommendationAgent(RecommendationAgent):
         user = ''
         item_list = []
         history_item_reviews = []
-        history_review = ''
+        filtered_item_reviews = []
+        history_reviews = []
+        loc = self.task['loc']
+        candidate_category = self.task['candidate_category']
         for sub_task in plan:
             
             if 'user' in sub_task['description']:
@@ -160,38 +205,59 @@ class MyRecommendationAgent(RecommendationAgent):
                 for n_bus in range(len(self.task['candidate_list'])):
                     item = self.interaction_tool.get_item(item_id=self.task['candidate_list'][n_bus])
                     keys_to_extract = ['item_id', 'name','stars','review_count','attributes','title', 'average_rating', 'rating_number','description','ratings_count','title_without_series']
-                    filtered_item = {key: item[key] for key in keys_to_extract if key in item}
-                    #item_review = self.interaction_tool.get_reviews(item_id=self.task['candidate_list'][n_bus])
-                    #history_item_reviews.append((str(filtered_item) + str(item_review)))
+                    filtered_item = str({key: item[key] for key in keys_to_extract if key in item})
+
+                    #keys_to_extract_review = ['review_id','item_id','stars','useful','funny','cool','text','type']
+                    keys_to_extract_review = ['stars','useful','funny','cool']
+                    item_reviews = self.interaction_tool.get_reviews(item_id=self.task['candidate_list'][n_bus])
+                    # for item_review in item_reviews:
+                    #     if item_review['type'] in candidate_category:
+                            #filtered_item_reviews.append({key: item_review[key] for key in keys_to_extract_review if key in item_review})
+                    added_item_reviews = self.average_score(item_reviews)
+
+                    #history_item_reviews.append((filtered_item,'reviews_score:',filtered_item_reviews))
+                    history_item_reviews.append((filtered_item + ', reviews_score: ' + added_item_reviews))
+
                     item_list.append(filtered_item)
                 # print(item)
             elif 'review' in sub_task['description']:
                 # find all reviews from the user
-                history_review = str(self.interaction_tool.get_reviews(user_id=self.task['user_id']))
-                input_tokens = num_tokens_from_string(history_review)
+                history_review = self.interaction_tool.get_reviews(user_id=self.task['user_id'])
+                keep_review_keys = ['review_id','item_id','stars','useful','funny','cool','text','type']
+                for review in history_review:
+                    history_reviews.append({key: review[key] for key in keep_review_keys if key in review})
+
+                history_reviews = str(history_reviews)
+                input_tokens = num_tokens_from_string(history_reviews)
                 if input_tokens > 12000:
                     encoding = tiktoken.get_encoding("cl100k_base")
-                    history_review = encoding.decode(encoding.encode(history_review)[:12000])
+                    history_reviews = encoding.decode(encoding.encode(history_review)[:12000])
             else:
                 pass
         # DO NOT output your analysis process!??????????
-        task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_review}. 
-                                Now you need to rank the following 20 items: {self.task['candidate_list']} according to their match degree to your preference.
-                                Please rank the more interested items more front in your rank list. The information of the above 20 candidate items is as follows: {item_list}.
-                                Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format, DO NOT introduce any other item ids!
-                                The correct output format:['item id1', 'item id2', 'item id3', ...]
-        '''
         # task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_review}. 
         #                         Now you need to rank the following 20 items: {self.task['candidate_list']} according to their match degree to your preference.
-        #                         Please rank the more interested items more front in your rank list. The information and reviews of the above 20 candidate items is as follows: {history_item_reviews}.
+        #                         Please rank the more interested items more front in your rank list. The information of the above 20 candidate items is as follows: {item_list}.
         #                         Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format, DO NOT introduce any other item ids!
         #                         The correct output format:['item id1', 'item id2', 'item id3', ...]
         # '''
+        task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_reviews}. 
+    Now you need to rank the following 20 items: {self.task['candidate_list']} according to their match degree to your preference.
+    Please rank the more interested items more front in your rank list. The information and reviews of the above 20 candidate items is as follows: {history_item_reviews}.
+    Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format, DO NOT introduce any other item ids!
+    The correct output format:['item id1', 'item id2', 'item id3', ...]
+        '''
+#         task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_review}. 
+# Now you need to rank the following 20 items: {self.task['candidate_list']} according to their match degree to your preference.
+# Please rank the more interested items more front in your rank list. The information and average reviews score of the above 20 candidate items is as follows: {history_item_reviews}.
+# Your final output should be ONLY a ranked item list with the following format: ['item id1', 'item id2', 'item id3', ...], DO NOT introduce any other item ids!
+#         '''
         # memory = self.memory(task_description)
         # print("memory:", memory)
         # prompt_len = num_tokens_from_string(task_description)
         # if prompt_len > 4096:
         #     print(f'prompt_len: {prompt_len}')
+        print('task_description:',task_description)
         result = self.reasoning(task_description)
 
         try:
@@ -221,15 +287,16 @@ if __name__ == "__main__":
     simulator.set_agent(MyRecommendationAgent)
 
     # Set LLM client
-    simulator.set_llm(InfinigenceLLM(api_key="sk-dapxrd44nc6qjgxk"))
+    #simulator.set_llm(InfinigenceLLM(api_key="sk-dapxrd44nc6qjgxk"))
+    simulator.set_llm(OpenAILLM(api_key="sk-ppL21f5be930e1e868145d1a8d891975ae07c9b6c4aNYc2c"))
 
     # Run evaluation
     # If you don't set the number of tasks, the simulator will run all tasks.
-    agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=False, max_workers=10)
+    agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=True, max_workers=10)
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'./evaluation_results_track2_{task_set}_unhack.json', 'w') as f:
-        json.dump(evaluation_results, f, indent=4)
+    # with open(f'./evaluation_results_track2_{task_set}_unhack_add_history_item_review_gpt4omini_merge_average_review_score.json', 'w') as f:
+    #     json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")
