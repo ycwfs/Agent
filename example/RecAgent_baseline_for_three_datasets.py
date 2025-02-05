@@ -24,7 +24,7 @@ class SummaryTool(ToolUseBase):
     def __init__(self, llm):
         super().__init__(llm=llm)
     
-    def __call__(self, reviews: str, item_id: str):
+    def __call__(self, reviews: str = None, item: str = None, item_id: str = None):
 #         prompt = f'''Analyze the data provided in {reviews} containing customer reviews for product {item_id}. 
 # Your task is to generate a concise summary that includes:
 # Overall Sentiment: Predominant positive/negative/neutral ratio (quantify if possible)
@@ -50,17 +50,31 @@ class SummaryTool(ToolUseBase):
 # User Fit: [Best for.../Avoid if...]
 # Use ➕/➖ symbols. No markdown. Strict 50 words.
 # '''
-        prompt = f'''Analyze {reviews} data. Strict 50-word summary for item {item_id}:
-Sentiment ratio (positive/neutral/negative %)
-Top 3 praised features with frequency
-Top 2 criticisms with severity (high/moderate)
-Key statistical insight from data
-Ideal user profile vs avoidance scenario
-Use only text and numbers. 
+        if reviews:
+            print('reviews:',reviews)
+            prompt = f'''Analyze {reviews} data. Strict 50-word summary for item {item_id}:
+    Sentiment ratio (positive/neutral/negative %)
+    Top 3 praised features with frequency
+    Top 2 criticisms with severity (high/moderate)
+    Key statistical insight from data
+    Ideal user profile vs avoidance scenario
+    Use only text and numbers. 
+    '''
+        if item:
+            print('item:',item)
+            prompt = f'''Summarize the key details of the following item info in a concise format. Include the most relevant information such as id, category, ratings, features, and any notable attributes. Keep the summary brief and to the point.
+    Example Format:
+    Item_id: [Item id]
+    Category: [Primary Category]
+    Rating: [Average Rating] (if available)
+    Key Features: [List 2-3 main features or attributes]
+    Notable Details: [Any unique or important information]
+
+    Item info:
+    {item}
 '''
         messages = [{"role": "user", "content": prompt}]
         summary = self.llm(messages=messages,temperature=0.1)
-        print('reviews:',reviews)
         print('summary:',summary)
         return summary
 
@@ -168,30 +182,31 @@ class MyRecommendationAgent(RecommendationAgent):
                     item_statictis = str(item)
 
                     item_reviews = self.interaction_tool.get_reviews(item_id=self.task['candidate_list'][n_bus])
-                    # filter reviews to prevent it to long
                     item_reviews = str(item_reviews)
                     input_tokens = num_tokens_from_string(item_reviews)
                     if input_tokens > 12000:
                         encoding = tiktoken.get_encoding("cl100k_base")
-                        item_reviews = encoding.decode(encoding.encode(item_reviews)[:12000])
-                        print('item_reviews_len:',len(item_reviews))
-                        print('input_tokens_len:',input_tokens)
+                        item_reviews = encoding.decode(encoding.encode(item_reviews)[:12000]) + '}'
 
                     # summary each review, use item_statictis or item_id
-                    summary_item_reviews.append(item_id + ' : ' + str(self.summary(item_reviews,item_id)))
+                    summary_item_reviews.append(self.summary(item=item_statictis) + '\n review summary: ' + self.summary(reviews = item_reviews,item_id = item_id))
+                    # summary_item_reviews.append(item_id + '\n review summary: ' + self.summary(reviews = item_reviews,item_id = item_id))
 
 
             elif 'review' in sub_task['description']:
                 # find all reviews from the user
                 history_reviews = self.interaction_tool.get_reviews(user_id=self.task['user_id'])
                 for history_review in history_reviews:
-                    item_id = str(history_review['item_id'])
+                    item_id = history_review['item_id']
+                    item_statictis = str(self.interaction_tool.get_item(item_id=item_id))
                     history_review = str(history_review)
                     input_tokens = num_tokens_from_string(history_review)
                     if input_tokens > 12000:
                         encoding = tiktoken.get_encoding("cl100k_base")
                         history_review = encoding.decode(encoding.encode(history_review)[:12000])
-                    history_reviewss.append(item_id + ' : '+ self.summary(history_review,item_id))
+                    history_reviewss.append(self.summary(item=item_statictis) + '\n review summary: ' + self.summary(reviews = history_review,item_id = item_id))
+                    # history_reviewss.append(item_id + '\n review summary: ' + self.summary(reviews = history_review,item_id = item_id))
+
             else:
                 pass
         # DO NOT output your analysis process!??????????
@@ -230,7 +245,6 @@ class MyRecommendationAgent(RecommendationAgent):
                 print('Meta Output:',result)
                 print("No list found.")
             print('Processed Output:',eval(result))
-            time.sleep(2)
             return eval(result)
         except:
             print('format error')
@@ -238,7 +252,7 @@ class MyRecommendationAgent(RecommendationAgent):
 
 
 if __name__ == "__main__":
-    task_set = "amazon" # "goodreads" or "yelp"
+    task_set = "yelp" # "goodreads" or "yelp"
     # Initialize Simulator
     simulator = Simulator(data_dir="/AgentSocietyChallenge/data", device="auto", cache=True)
 
@@ -249,16 +263,17 @@ if __name__ == "__main__":
     simulator.set_agent(MyRecommendationAgent)
 
     # Set LLM client
-    simulator.set_llm(InfinigenceLLM(api_key="sk-dapxrd44nc6qjgxk"))
-    #simulator.set_llm(OpenAILLM(api_key="sk-ppL21f5be930e1e868145d1a8d891975ae07c9b6c4aNYc2c"))
+    
+    #simulator.set_llm(InfinigenceLLM(api_key="sk-dapxrd44nc6qjgxk"))
+    simulator.set_llm(OpenAILLM(api_key="sk-ppL21f5be930e1e868145d1a8d891975ae07c9b6c4aNYc2c"))
 
     # Run evaluation
     # If you don't set the number of tasks, the simulator will run all tasks.
-    agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=False, max_workers=10)
+    agent_outputs = simulator.run_simulation(number_of_tasks=None, enable_threading=True, max_workers=10)
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'./evaluation_results_track2_{task_set}_unhack_add_history_item_review_gpt4omini_prompt.json', 'w') as f:
+    with open(f'./evaluation_results_track2_{task_set}_unhack_summary_prompt.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")
