@@ -24,10 +24,44 @@ class SummaryTool(ToolUseBase):
     def __init__(self, llm):
         super().__init__(llm=llm)
     
-    def __call__(self, text: str):
-        prompt = f'''Summarize the following text: {text}'''
+    def __call__(self, reviews: str, item_id: str):
+#         prompt = f'''Analyze the data provided in {reviews} containing customer reviews for product {item_id}. 
+# Your task is to generate a concise summary that includes:
+# Overall Sentiment: Predominant positive/negative/neutral ratio (quantify if possible)
+# Key Strengths:
+# List 3-5 most frequently mentioned positive attributes (e.g. durability, ease of use)
+# Include specific praise quotes when notable
+# Common Criticisms:
+# List 3-5 most repeated complaints
+# Note any severity patterns (e.g. "20% mentioned delivery issues")
+# Emerging Patterns:
+# Unusual praise/criticism worth highlighting
+# Contradictory opinions (e.g. "some found X intuitive while others struggled")
+# Recommendation Insight:
+# Typical user profile this product suits best
+# Who should avoid it based on reviews
+# Structure the summary with clear headings and bullet points. Maintain neutral tone while preserving review nuances. Highlight any statistically significant findings if detectable from the data.
+# '''
+#         prompt = f'''Analyze {reviews} data. 50-word summary for item {item_id}:
+# Sentiment: [%+/-]
+# Top 3 Pros (with frequency%)
+# Top 2 Cons (severity🔴/🟡)
+# Key Stat (e.g. '60% praised X')
+# User Fit: [Best for.../Avoid if...]
+# Use ➕/➖ symbols. No markdown. Strict 50 words.
+# '''
+        prompt = f'''Analyze {reviews} data. Strict 50-word summary for item {item_id}:
+Sentiment ratio (positive/neutral/negative %)
+Top 3 praised features with frequency
+Top 2 criticisms with severity (high/moderate)
+Key statistical insight from data
+Ideal user profile vs avoidance scenario
+Use only text and numbers. 
+'''
         messages = [{"role": "user", "content": prompt}]
         summary = self.llm(messages=messages,temperature=0.1)
+        print('reviews:',reviews)
+        print('summary:',summary)
         return summary
 
 class RecMemory(MemoryBase):
@@ -70,42 +104,6 @@ class RecMemory(MemoryBase):
         # Add to memory store
         self.scenario_memory.add_documents([memory_doc])
 
-class RecPlanning(PlanningBase):
-    """Inherits from PlanningBase"""
-    
-    def __init__(self, llm):
-        """Initialize the planning module"""
-        super().__init__(llm=llm)
-    
-    def create_prompt(self, task_type, task_description, feedback, few_shot):
-        """Override the parent class's create_prompt method"""
-        if feedback == '':
-            prompt = '''You are a planner who divides a {task_type} task into several subtasks. You also need to give the reasoning instructions for each subtask. Your output format should follow the example below.
-                        The following are some examples:
-                        Task: I need to find some information to complete a recommendation task.
-                        sub-task 1: {{"description": "First I need to find user information", "reasoning instruction": "None"}}
-                        sub-task 2: {{"description": "Next, I need to find item information", "reasoning instruction": "None"}}
-                        sub-task 3: {{"description": "Next, I need to find review information", "reasoning instruction": "None"}}
-
-                        Task: {task_description}
-                        '''
-            prompt = prompt.format(task_description=task_description, task_type=task_type)
-        else:
-            prompt = '''You are a planner who divides a {task_type} task into several subtasks. You also need to give the reasoning instructions for each subtask. Your output format should follow the example below.
-                        The following are some examples:
-                        Task: I need to find some information to complete a recommendation task.
-                        sub-task 1: {{"description": "First I need to find user information", "reasoning instruction": "None"}}
-                        sub-task 2: {{"description": "Next, I need to find item information", "reasoning instruction": "None"}}
-                        sub-task 3: {{"description": "Next, I need to find review information", "reasoning instruction": "None"}}
-
-                        end
-                        --------------------
-                        Reflexion:{feedback}
-                        Task:{task_description}
-                        '''
-            prompt = prompt.format(example=few_shot, task_description=task_description, task_type=task_type, feedback=feedback)
-        return prompt
-
 class RecReasoning(ReasoningBase):
     """Inherits from ReasoningBase"""
     
@@ -133,51 +131,9 @@ class MyRecommendationAgent(RecommendationAgent):
     """
     def __init__(self, llm:LLMBase):
         super().__init__(llm=llm)
-        self.planning = RecPlanning(llm=self.llm)
         self.reasoning = RecReasoning(profile_type_prompt='', llm=self.llm)
         #self.memory = RecMemory(llm=self.llm)
-
-    def add_average_score(self, filtered_item, reviews):
-        """
-        Calculate the average score of reviews
-        Args:
-            reviews: list of reviews
-        Returns:
-            float: average score
-        """
-        total_stars = 0
-        total_cool = 0
-        total_useful = 0
-        total_fanny = 0
-        for review in reviews:
-            total_stars += review['stars']
-            total_cool += review['cool']
-            total_useful += review['useful']
-            total_fanny += review['funny']
-        #filtered_item['average_stars'] = round(total_stars/len(reviews),2)
-        filtered_item['cool'] = round(total_cool/len(reviews),2)
-        filtered_item['useful'] = round(total_useful/len(reviews),2)
-        filtered_item['fanny'] = round(total_fanny/len(reviews),2)
-        return filtered_item
-
-    def average_score(self, reviews):
-        """
-        Calculate the average score of reviews
-        Args:
-            reviews: list of reviews
-        Returns:
-            float: average score
-        """
-        total_stars = 0
-        total_cool = 0
-        total_useful = 0
-        total_fanny = 0
-        for review in reviews:
-            total_stars += review['stars']
-            total_cool += review['cool']
-            total_useful += review['useful']
-            total_fanny += review['funny']
-        return f'average_stars: {round(total_stars/len(reviews),2)}, average_cool: {round(total_cool/len(reviews),2)}, average_useful: {round(total_useful/len(reviews),2)}, average_fanny: {round(total_fanny/len(reviews),2)}'
+        self.summary = SummaryTool(llm=self.llm)
 
     def workflow(self):
         """
@@ -185,11 +141,6 @@ class MyRecommendationAgent(RecommendationAgent):
         Returns:
             list: Sorted list of item IDs
         """
-        # plan = self.planning(task_type='Recommendation Task',
-        #                      task_description="Please make a plan to query user information, you can choose to query user, item, and review information, ",
-        #                      feedback='',
-        #                      few_shot='')
-        # print(f"The plan is :{plan}")
         plan = [
          {'description': 'First I need to find user information'},
          {'description': 'Next, I need to find item information'},
@@ -198,11 +149,9 @@ class MyRecommendationAgent(RecommendationAgent):
 
         user = ''
         item_list = []
-        history_item_reviews = []
-        filtered_item_reviews = []
-        history_reviews = []
-        loc = self.task['loc']
-        candidate_category = self.task['candidate_category']
+        summary_item_reviews = []
+        history_reviewss = []
+        # loc = self.task['loc']
         for sub_task in plan:
             
             if 'user' in sub_task['description']:
@@ -215,42 +164,34 @@ class MyRecommendationAgent(RecommendationAgent):
             elif 'item' in sub_task['description']:
                 for n_bus in range(len(self.task['candidate_list'])):
                     item = self.interaction_tool.get_item(item_id=self.task['candidate_list'][n_bus])
-                    keys_to_extract = ['item_id', 'name','stars','review_count','attributes','title', 'average_rating', 'rating_number','description','ratings_count','title_without_series','categories']
-                    filtered_item = str({key: item[key] for key in keys_to_extract if key in item})
+                    item_id = item['item_id']
+                    item_statictis = str(item)
 
-                    #keys_to_extract_review = ['review_id','item_id','stars','useful','funny','cool','text','type']
-                    keys_to_extract_review = ['stars','useful','funny','cool']
                     item_reviews = self.interaction_tool.get_reviews(item_id=self.task['candidate_list'][n_bus])
-                    # add each review
-                    # for item_review in item_reviews:
-                    #     if item_review['type'] in candidate_category:
-                            #filtered_item_reviews.append({key: item_review[key] for key in keys_to_extract_review if key in item_review})
-                    
-                    # add average score statistics from all reviews
-                    added_item_reviews = self.average_score(item_reviews)
+                    # filter reviews to prevent it to long
+                    item_reviews = str(item_reviews)
+                    input_tokens = num_tokens_from_string(item_reviews)
+                    if input_tokens > 12000:
+                        encoding = tiktoken.get_encoding("cl100k_base")
+                        item_reviews = encoding.decode(encoding.encode(item_reviews)[:12000])
+                        print('item_reviews_len:',len(item_reviews))
+                        print('input_tokens_len:',input_tokens)
 
-                    #history_item_reviews.append((filtered_item,'reviews_score:',filtered_item_reviews))
-                    history_item_reviews.append((filtered_item + ', reviews_score: ' + added_item_reviews))
+                    # summary each review, use item_statictis or item_id
+                    summary_item_reviews.append(item_id + ' : ' + str(self.summary(item_reviews,item_id)))
 
-                    # only item
-                    item_list.append(filtered_item)
 
-                #history_item_reviews = str(history_item_reviews)
-                item_list = str(item_list)
-                # print(item)
             elif 'review' in sub_task['description']:
                 # find all reviews from the user
-                history_review = self.interaction_tool.get_reviews(user_id=self.task['user_id'])
-                # delete review_id
-                keep_review_keys = ['item_id','stars','useful','funny','cool','text','type']
-                for review in history_review:
-                    history_reviews.append({key: review[key] for key in keep_review_keys if key in review})
-
-                history_reviews = str(history_reviews)
-                input_tokens = num_tokens_from_string(history_reviews)
-                if input_tokens > 12000:
-                    encoding = tiktoken.get_encoding("cl100k_base")
-                    history_reviews = encoding.decode(encoding.encode(history_review)[:12000])
+                history_reviews = self.interaction_tool.get_reviews(user_id=self.task['user_id'])
+                for history_review in history_reviews:
+                    item_id = str(history_review['item_id'])
+                    history_review = str(history_review)
+                    input_tokens = num_tokens_from_string(history_review)
+                    if input_tokens > 12000:
+                        encoding = tiktoken.get_encoding("cl100k_base")
+                        history_review = encoding.decode(encoding.encode(history_review)[:12000])
+                    history_reviewss.append(item_id + ' : '+ self.summary(history_review,item_id))
             else:
                 pass
         # DO NOT output your analysis process!??????????
@@ -260,10 +201,11 @@ class MyRecommendationAgent(RecommendationAgent):
         #                         Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format, DO NOT introduce any other item ids!
         #                         The correct output format:['item id1', 'item id2', 'item id3', ...]
         # '''
-        task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_reviews}. 
+        task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_reviewss}. 
     Now you need to rank the following 20 items: {self.task['candidate_list']} according to their match degree to your preference.
-    Please rank the more interested items more front in your rank list. The information of the above 20 candidate items is as follows: {history_item_reviews}.
-    Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format, DO NOT introduce any other item ids!
+    Please rank the more interested items more front in your rank list. The information and reviews of the above 20 candidate items is as follows: {summary_item_reviews}.
+    Your final output should be ONLY a ranked item list of {self.task['candidate_list']} with the following format,
+    DO NOT introduce any other item ids!
     The correct output format:['item id1', 'item id2', 'item id3', ...]
         '''
 #         task_description = f'''You are a real user on an online platform. Your historical item review text and stars are as follows: {history_review}. 
@@ -276,6 +218,7 @@ class MyRecommendationAgent(RecommendationAgent):
         # prompt_len = num_tokens_from_string(task_description)
         # if prompt_len > 4096:
         #     print(f'prompt_len: {prompt_len}')
+        print('----------------------------------------------------------------------------')
         print('task_description:',task_description)
         result = self.reasoning(task_description)
 
@@ -295,9 +238,9 @@ class MyRecommendationAgent(RecommendationAgent):
 
 
 if __name__ == "__main__":
-    task_set = "yelp" # "goodreads" or "yelp"
+    task_set = "amazon" # "goodreads" or "yelp"
     # Initialize Simulator
-    simulator = Simulator(data_dir="/AgentSocietyChallenge/data", device="auto", cache=False)
+    simulator = Simulator(data_dir="/AgentSocietyChallenge/data", device="auto", cache=True)
 
     # Load scenarios
     simulator.set_task_and_groundtruth(task_dir=f"/AgentSocietyChallenge/example/track2/{task_set}/tasks", groundtruth_dir=f"/AgentSocietyChallenge/example/track2/{task_set}/groundtruth")
@@ -306,8 +249,8 @@ if __name__ == "__main__":
     simulator.set_agent(MyRecommendationAgent)
 
     # Set LLM client
-    #simulator.set_llm(InfinigenceLLM(api_key="sk-dapxrd44nc6qjgxk"))
-    simulator.set_llm(OpenAILLM(api_key="sk-ppL21f5be930e1e868145d1a8d891975ae07c9b6c4aNYc2c"))
+    simulator.set_llm(InfinigenceLLM(api_key="sk-dapxrd44nc6qjgxk"))
+    #simulator.set_llm(OpenAILLM(api_key="sk-ppL21f5be930e1e868145d1a8d891975ae07c9b6c4aNYc2c"))
 
     # Run evaluation
     # If you don't set the number of tasks, the simulator will run all tasks.
@@ -315,7 +258,7 @@ if __name__ == "__main__":
 
     # Evaluate the agent
     evaluation_results = simulator.evaluate()
-    with open(f'./evaluation_results_track2_{task_set}_unhack_add_history_item_review_gpt4omini_adjust_prompt.json', 'w') as f:
+    with open(f'./evaluation_results_track2_{task_set}_unhack_add_history_item_review_gpt4omini_prompt.json', 'w') as f:
         json.dump(evaluation_results, f, indent=4)
 
     print(f"The evaluation_results is :{evaluation_results}")

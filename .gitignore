@@ -3,7 +3,7 @@ build/
 test*
 cache/
 ignore/
-*.ipynb*
+#*.ipynb*
 *.ipynb*/
 *pycache*
 *pycache*/
@@ -17,3 +17,4 @@ __*/
 TODO
 db/
 data/
+*.zip
